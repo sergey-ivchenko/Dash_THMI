@@ -12,6 +12,18 @@ public:
     VOLTAGE
     };
 
+    enum class WarningCondition : uint8_t 
+    {
+        BELOW = 0,
+        ABOVE
+    };
+
+    struct WarningSettings
+    {
+        WarningCondition condition;
+        double threshold;
+    };
+
 private:
     float pullupResistor = 1190;
     float pullupVoltage = 3.33;
@@ -30,6 +42,10 @@ private:
 
     ADS1X15::ADS1115<TwoWire>* ads;
     uint8_t channel;
+
+    WarningSettings warningSettings;
+
+    bool bWarningEnabled = true;
 
 private:
 
@@ -149,5 +165,27 @@ public:
     float Resistance()
     {
         return curResistance;
+    }
+
+    void SetWarningSettings(const WarningSettings& settings)
+    {
+        warningSettings = settings;
+    }
+
+    bool IsWarning()
+    {
+        if(!bWarningEnabled)
+        {
+            return false;
+        }
+        switch (warningSettings.condition)
+        {
+        case WarningCondition::ABOVE:
+            return smoothValue >= warningSettings.threshold;
+        case WarningCondition::BELOW:
+            return smoothValue <= warningSettings.threshold;
+        default:
+            return false;
+        }
     }
 };

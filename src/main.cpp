@@ -9,39 +9,74 @@
 #include "bg_nums.h"
 #include "DrawUtils.h"
 
-#define I2C_SDA 17
-#define I2C_SCL 18
+#define I2C_SDA 43
+#define I2C_SCL 44
 
 TFT_eSPI tft = TFT_eSPI();
 TFT_eSprite backbuffer = TFT_eSprite(&tft);
-
+const double sensorsPullup = 5.0;
 //-------------Sensors----------------------------------------
 using namespace ADS1X15;
-
-ADS1115<TwoWire> ads(Wire);
-
 //------------------------------------------------------------
+//ads0 sensors
+ADS1115<TwoWire> ads0(Wire);//addr 2 gnd
+
 double tempResistance[] = {900,1170, 1510, 1970, 2550, 3320, 4430, 6140, 8610, 12320, 17950, 26650, 40340, 62320};
 double tempValues[] = {150, 140, 130, 120, 110, 100, 90, 80, 70, 60, 50, 40, 30, 20};
 uint16_t tempLen = 14;
 
-AnalogSensor waterTempSensor(tempResistance, tempValues, tempLen, 3.29, 1200, 20, &ads, (uint8_t)0, AnalogSensor::SensorType::RESISTIVE);
-AnalogSensor oilTempSensor(tempResistance, tempValues, tempLen, 3.29, 47000, 20, &ads, (uint8_t)1, AnalogSensor::SensorType::RESISTIVE);
+double voltage12VVoltage[] = {0,6};
+double voltage12VValues[] = {0,6};
+uint16_t voltage12VLen = 2;
 
+AnalogSensor waterTempSensor(tempResistance, tempValues, tempLen, sensorsPullup, 10000/*Ohm*/, 20, &ads0, 0, AnalogSensor::SensorType::RESISTIVE);
+AnalogSensor oilTempSensor(tempResistance, tempValues, tempLen, sensorsPullup, 10000/*Ohm*/, 20, &ads0, 1, AnalogSensor::SensorType::RESISTIVE);
+AnalogSensor voltage12v(voltage12VVoltage, voltage12VValues, voltage12VLen, -1, -1, 0, &ads0, 3, AnalogSensor::SensorType::VOLTAGE);
 //------------------------------------------------------------
+//ads1 sensors
+ADS1115<TwoWire> ads1(Wire);//addr 2 vcc
 
-double fuelPresVoltage[] = {0.5,4.5};
+double fuelLevelResistance[] = {5, 32, 110};//stock EF fuel sensor
+double fuelLevelValues[] = {100, 50, 0};
+uint16_t fuelLevelLen = 3;
+
+double fuelPresVoltage[] = {0.5, 4.5};
 double fuelPresValues[] = {0, 6.89};//100psi sensor
 uint16_t fuelPresLen = 2;
 
-double oilPresVoltage[] = {0,5};
+double oilPresVoltage[] = {0.5, 4.5};
 double oilPresValues[] = {0, 10.34};//150psi sensor
 uint16_t oilPresLen = 2;
 
-AnalogSensor fuelPressureSensor(fuelPresVoltage, fuelPresValues, fuelPresLen, -1, -1, 2, &ads, 2,  AnalogSensor::SensorType::VOLTAGE);
-AnalogSensor oilPressureSensor(oilPresVoltage, oilPresValues, oilPresLen, -1, -1, 0, &ads, 3, AnalogSensor::SensorType::VOLTAGE);
+double voltage5VValues[] = {0,6};
+uint16_t voltage5VLen = 2;
+
+AnalogSensor fuelLevelSensor(fuelLevelResistance, fuelLevelValues, fuelLevelLen, sensorsPullup, 200/*Ohm*/, 500, &ads1, 0,  AnalogSensor::SensorType::RESISTIVE);
+AnalogSensor fuelPressureSensor(fuelPresVoltage, fuelPresValues, fuelPresLen, -1, -1, 2, &ads1, 1,  AnalogSensor::SensorType::VOLTAGE);
+AnalogSensor oilPressureSensor(oilPresVoltage, oilPresValues, oilPresLen, -1, -1, 0, &ads1, 2, AnalogSensor::SensorType::VOLTAGE);
+AnalogSensor voltage5v(voltage5VValues, voltage5VValues, voltage5VLen, -1, -1, 0, &ads1, 3, AnalogSensor::SensorType::VOLTAGE);
 //------------------------------------------------------------
 
+void InitWarnings()
+{
+    AnalogSensor::WarningSettings ws;
+
+    ws.condition = AnalogSensor::WarningCondition::ABOVE;
+    ws.threshold = 105;
+    waterTempSensor.SetWarningSettings(ws);
+
+    ws.condition = AnalogSensor::WarningCondition::ABOVE;
+    ws.threshold = 125;
+    oilTempSensor.SetWarningSettings(ws);
+
+    ws.condition = AnalogSensor::WarningCondition::BELOW;
+    ws.threshold = 0.5;
+    oilPressureSensor.SetWarningSettings(ws);
+
+    ws.condition = AnalogSensor::WarningCondition::BELOW;
+    ws.threshold = 3.0;
+    fuelPressureSensor.SetWarningSettings(ws);
+}
 
 void setBrightness(uint8_t value)
 {
@@ -105,10 +140,15 @@ void ScanI2C()
 
 void UpdateSensors()
 {
-    oilPressureSensor.UpdateSensor();
-    fuelPressureSensor.UpdateSensor();
     oilTempSensor.UpdateSensor();
     waterTempSensor.UpdateSensor();
+    voltage12v.UpdateSensor();
+
+    fuelLevelSensor.UpdateSensor();
+    fuelPressureSensor.UpdateSensor();
+    oilPressureSensor.UpdateSensor();
+    voltage5v.UpdateSensor();
+    
 }
 
 void InitTft()
@@ -127,9 +167,27 @@ void InitI2C()
     Wire.setPins(I2C_SDA, I2C_SCL);
     //ScanI2C();
 
-    ads.begin();
-    ads.setGain(Gain::ONE_4096MV);
-    ads.setDataRate(Rate::ADS1115_250SPS);
+    ads0.begin(0x48);   //addr pin to ground
+    ads0.setGain(Gain::TWOTHIRDS_6144MV);
+    ads0.setDataRate(Rate::ADS1115_250SPS);
+
+    ads1.begin(0x49);   //addr pin to vcc
+    ads1.setGain(Gain::TWOTHIRDS_6144MV);
+    ads1.setDataRate(Rate::ADS1115_250SPS);
+}
+
+void UpdateWarnings()
+{
+
+    if (oilTempSensor.IsWarning() ||
+        waterTempSensor.IsWarning() ||
+        voltage12v.IsWarning() ||
+        fuelLevelSensor.IsWarning() ||
+        fuelPressureSensor.IsWarning() ||
+        oilPressureSensor.IsWarning())
+    {
+        //light up warning led or activate buzzer
+    }
 }
 
 void setup()
@@ -140,6 +198,7 @@ void setup()
 
     InitTft();
     InitI2C();
+    InitWarnings();
 }
 
 unsigned long lastFrameTime = 0;
@@ -185,9 +244,8 @@ void DrawMainScreen()
     backbuffer.drawString(String(percent) + "%", 277, 231);
 }
 
-void DrawDevScreen()
+void DrawDebugScreen()
 {
-
     backbuffer.fillScreen(TFT_BLACK);
     backbuffer.drawLine(160, 0, 160, 240, TFT_DARKGREY);
     backbuffer.drawLine(0, 130, 320, 130, TFT_DARKGREY);
@@ -223,7 +281,7 @@ void loop()
     UpdateSensors();
 
     DrawMainScreen();
-    //DrawDevScreen();
+    //DrawDebugScreen();
     DrawFPS();
 
     backbuffer.pushSprite(0,0);
