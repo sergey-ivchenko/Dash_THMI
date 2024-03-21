@@ -127,11 +127,24 @@ public:
 
     String StrValue(uint16_t decimals = 2)
     {
+        if(type== SensorType::RESISTIVE && (Resistance() > 1000000 || Resistance() < 1))
+            return "---";
         return String(smoothValue, decimals);
     }
 
     String StrValueRaw(uint16_t decimals = 2)
     {
+        if(type== SensorType::RESISTIVE)
+        {
+            if(curVoltage >= pullupVoltage - 0.01) 
+            {
+                return "Open";
+            }
+            if(curVoltage < 0.01)
+            {
+                return "Short";
+            }
+        }
         return String(curValue, decimals);
     }
 
@@ -143,6 +156,11 @@ public:
     String StrResistance()
     {
         return String(curResistance, 0);
+    }
+
+    String StrPullUpVoltage()
+    {
+        return String(pullupVoltage, 3);
     }
 
     
@@ -187,5 +205,10 @@ public:
         default:
             return false;
         }
+    }
+
+    void SetPullUpVoltage(float v)
+    {
+        pullupVoltage = v + 0.003; //increase a bit because of adc tolerance
     }
 };

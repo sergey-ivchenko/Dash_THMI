@@ -3,10 +3,10 @@
 #include <Wire.h>
 
 #include "pins.h"
-#include "Sensors.h"
-#include "font.h"
-#include "bg.h"
-#include "bg_nums.h"
+#include "sensors.h"
+#include "fonts.h"
+#include "bg1.h"
+#include "bg2.h"
 #include "DrawUtils.h"
 
 #define I2C_SDA 43
@@ -14,10 +14,11 @@
 
 TFT_eSPI tft = TFT_eSPI();
 TFT_eSprite backbuffer = TFT_eSprite(&tft);
-const double sensorsPullup = 5.0;
+bool bEnableWarnings = false;
 //-------------Sensors----------------------------------------
 using namespace ADS1X15;
 //------------------------------------------------------------
+const double sensorsPullup = 5.0;
 //ads0 sensors
 ADS1115<TwoWire> ads0(Wire);//addr 2 gnd
 
@@ -26,7 +27,7 @@ double tempValues[] = {150, 140, 130, 120, 110, 100, 90, 80, 70, 60, 50, 40, 30,
 uint16_t tempLen = 14;
 
 double voltage12VVoltage[] = {0,6};
-double voltage12VValues[] = {0,6};
+double voltage12VValues[] = {0,22.78};
 uint16_t voltage12VLen = 2;
 
 AnalogSensor waterTempSensor(tempResistance, tempValues, tempLen, sensorsPullup, 10000/*Ohm*/, 20, &ads0, 0, AnalogSensor::SensorType::RESISTIVE);
@@ -34,7 +35,7 @@ AnalogSensor oilTempSensor(tempResistance, tempValues, tempLen, sensorsPullup, 1
 AnalogSensor voltage12v(voltage12VVoltage, voltage12VValues, voltage12VLen, -1, -1, 0, &ads0, 3, AnalogSensor::SensorType::VOLTAGE);
 //------------------------------------------------------------
 //ads1 sensors
-ADS1115<TwoWire> ads1(Wire);//addr 2 vcc
+ADS1115<TwoWire> ads1(Wire);
 
 double fuelLevelResistance[] = {5, 32, 110};//stock EF fuel sensor
 double fuelLevelValues[] = {100, 50, 0};
@@ -52,9 +53,24 @@ double voltage5VValues[] = {0,6};
 uint16_t voltage5VLen = 2;
 
 AnalogSensor fuelLevelSensor(fuelLevelResistance, fuelLevelValues, fuelLevelLen, sensorsPullup, 200/*Ohm*/, 500, &ads1, 0,  AnalogSensor::SensorType::RESISTIVE);
-AnalogSensor fuelPressureSensor(fuelPresVoltage, fuelPresValues, fuelPresLen, -1, -1, 2, &ads1, 1,  AnalogSensor::SensorType::VOLTAGE);
+AnalogSensor fuelPressureSensor(fuelPresVoltage, fuelPresValues, fuelPresLen, -1, -1, 0, &ads1, 1,  AnalogSensor::SensorType::VOLTAGE);
 AnalogSensor oilPressureSensor(oilPresVoltage, oilPresValues, oilPresLen, -1, -1, 0, &ads1, 2, AnalogSensor::SensorType::VOLTAGE);
 AnalogSensor voltage5v(voltage5VValues, voltage5VValues, voltage5VLen, -1, -1, 0, &ads1, 3, AnalogSensor::SensorType::VOLTAGE);
+//------------------------------------------------------------
+
+enum class Mode : uint8_t
+{
+    MAIN1 = 0,
+    MAIN2,
+    DEBUG
+};
+
+Mode mode = Mode::MAIN1;
+//------------------------------------------------------------
+
+bool buttonIsDown = false;
+u_long buttonDownTimestamp = 0;
+const u_long buttonLongPressTime = 5000;
 //------------------------------------------------------------
 
 void InitWarnings()
@@ -140,14 +156,21 @@ void ScanI2C()
 
 void UpdateSensors()
 {
+    voltage5v.UpdateSensor();
+
+    fuelLevelSensor.SetPullUpVoltage(voltage5v.Value());
+    oilTempSensor.SetPullUpVoltage(voltage5v.Value());
+    waterTempSensor.SetPullUpVoltage(voltage5v.Value());
+
+    fuelPressureSensor.UpdateSensor();
+    oilPressureSensor.UpdateSensor();
+    fuelLevelSensor.UpdateSensor();
+
+
     oilTempSensor.UpdateSensor();
     waterTempSensor.UpdateSensor();
     voltage12v.UpdateSensor();
 
-    fuelLevelSensor.UpdateSensor();
-    fuelPressureSensor.UpdateSensor();
-    oilPressureSensor.UpdateSensor();
-    voltage5v.UpdateSensor();
     
 }
 
@@ -165,7 +188,8 @@ void InitTft()
 void InitI2C()
 {
     Wire.setPins(I2C_SDA, I2C_SCL);
-    //ScanI2C();
+    // delay(3000);
+    // ScanI2C();
 
     ads0.begin(0x48);   //addr pin to ground
     ads0.setGain(Gain::TWOTHIRDS_6144MV);
@@ -178,111 +202,205 @@ void InitI2C()
 
 void UpdateWarnings()
 {
-
-    if (oilTempSensor.IsWarning() ||
+    if(!bEnableWarnings)
+    {
+        tft.invertDisplay(false);
+    }
+    else if (
+        oilTempSensor.IsWarning() ||
         waterTempSensor.IsWarning() ||
         voltage12v.IsWarning() ||
         fuelLevelSensor.IsWarning() ||
         fuelPressureSensor.IsWarning() ||
         oilPressureSensor.IsWarning())
     {
-        //light up warning led or activate buzzer
+        tft.invertDisplay(millis() % 1000 > 500);
     }
 }
 
 void setup()
 {
     Serial.begin(9600);
+    pinMode(BUTTON1_PIN, INPUT_PULLUP);
+
     pinMode(PWR_EN_PIN, OUTPUT);
     digitalWrite(PWR_EN_PIN, HIGH);
 
     InitTft();
     InitI2C();
     InitWarnings();
+
+    UpdateSensors();
 }
 
-unsigned long lastFrameTime = 0;
-float FPS = 0;
 void DrawFPS()
 {
+    static unsigned long lastFrameTime = 0;
+    static float FPS = 0;
+
     unsigned long time = millis();
     uint32_t frameTime = time - lastFrameTime;
     lastFrameTime = time;
     FPS = (FPS * 9 + 1000.f/frameTime) / 10;
 
     backbuffer.setTextDatum(TL_DATUM);
-    backbuffer.loadFont(Square721_25);
+    backbuffer.loadFont(Arial_16);
     backbuffer.drawString(String(FPS), 0, 0);
 }
-uint16_t percent = 0;
 
 void DrawMainScreen()
 {
-    if(percent == 100 || percent == 0)
-    {
-        delay(3000);
-    }
-    
-
-    backbuffer.pushImage(0,0, 320, 240, bg);
-    backbuffer.loadFont(Square721_44);
     backbuffer.setTextColor(TFT_WHITE);
     backbuffer.setTextDatum(TR_DATUM);
+    backbuffer.loadFont(Square721_44);
+    switch (mode)
+    {
+    case Mode::MAIN1:
+        backbuffer.pushImage(0,0, 320, 240, bg1);
+        backbuffer.drawString(oilTempSensor.StrValue(0), 186, 95);
+        backbuffer.drawString(oilPressureSensor.StrValue(1), 186, 156);
+        break;
+
+    case Mode::MAIN2:
+        backbuffer.pushImage(0,0, 320, 240, bg2);
+        backbuffer.drawString(fuelPressureSensor.StrValue(1), 186, 95);
+        backbuffer.drawString(voltage12v.StrValue(1), 198, 156);
+        break;
+    
+    default:
+        break;
+    }
 
     backbuffer.drawString(waterTempSensor.StrValue(0), 186, 24);
-    backbuffer.drawString(oilTempSensor.StrValue(0), 186, 95);
-    backbuffer.drawString(oilPressureSensor.StrValue(1), 186, 156);
 
-    percent++;
-    percent %= 101;
     DrawProgressBar(backbuffer, P_VERTICAL, 257, 183, 16, 155, 
-    10, 3, 2, 
-    percent, TFT_WHITE, TFT_DARKGREY);
+    10, 3, 2,
+    (int)fuelLevelSensor.Value(), TFT_WHITE, TFT_DARKGREY);
 
     backbuffer.loadFont(Square721_25);
     backbuffer.setTextDatum(BC_DATUM);
-    backbuffer.drawString(String(percent) + "%", 277, 231);
+    backbuffer.drawString(fuelLevelSensor.StrValue(0) + "%", 277, 231);
 }
 
 void DrawDebugScreen()
 {
-    backbuffer.fillScreen(TFT_BLACK);
-    backbuffer.drawLine(160, 0, 160, 240, TFT_DARKGREY);
-    backbuffer.drawLine(0, 130, 320, 130, TFT_DARKGREY);
 
-    backbuffer.loadFont(Square721_25);
+    const uint16_t x0 = 10;
+    const uint16_t x1 = 113;
+    const uint16_t x2 = 216;
+    uint16_t y = 40;
+    uint16_t off = 18;
+    backbuffer.fillSprite(TFT_BLACK);
+    // backbuffer.drawLine(160, 0, 160, 240, TFT_DARKGREY);
+    // backbuffer.drawLine(0, 130, 320, 130, TFT_DARKGREY);
+
+    backbuffer.loadFont(Arial_16);
     backbuffer.setTextColor(TFT_WHITE);
     backbuffer.setTextDatum(TL_DATUM);
 
-    backbuffer.drawString("Water temp:", 0, 20);
-    backbuffer.drawString("Oil Temp:", 0, 145);
-    backbuffer.drawString("Fuel Press:", 162, 20);
-    backbuffer.drawString("Oil Press:", 162, 145);
-
-    backbuffer.setTextColor(TFT_BLUE);
-    backbuffer.drawString(waterTempSensor.StrValueRaw(2) + " *C", 0, 45);
-    backbuffer.drawString(oilTempSensor.StrValueRaw(2) + " *C", 0, 170);
-    backbuffer.drawString(fuelPressureSensor.StrValueRaw(2) + " Bar", 162, 45);
-    backbuffer.drawString(oilPressureSensor.StrValueRaw(2) + " Bar", 162, 170);
+    backbuffer.drawString("Water temp:", x0, y);
+    backbuffer.drawString("Oil Temp:", x1, y);
+    backbuffer.drawString("Fuel level:", x2, y);
+    y+=off;
 
     backbuffer.setTextColor(TFT_YELLOW);
-    backbuffer.drawString(waterTempSensor.StrResistance() + " R", 0, 70);
-    backbuffer.drawString(oilTempSensor.StrResistance() + " R", 0, 195);
+    backbuffer.drawString("R:" + waterTempSensor.StrResistance(), x0, y);
+    backbuffer.drawString("R:" + oilTempSensor.StrResistance(), x1, y);
+    backbuffer.drawString("R:" + fuelLevelSensor.StrResistance(), x2, y);
+    y+=off;
+
+    backbuffer.setTextColor(TFT_SILVER);
+    backbuffer.drawString(waterTempSensor.StrValueRaw(2) + " *C", x0, y);
+    backbuffer.drawString(oilTempSensor.StrValueRaw(2) + " *C", x1, y);
+    backbuffer.drawString(fuelLevelSensor.StrValueRaw(2) + " %", x2, y);
+    y+=off;
 
     backbuffer.setTextColor(TFT_GREEN);
-    backbuffer.drawString(waterTempSensor.StrVoltage() + " V", 0, 95);
-    backbuffer.drawString(oilTempSensor.StrVoltage() + " V", 0, 220);
-    backbuffer.drawString(fuelPressureSensor.StrVoltage() + " V", 162, 95);
-    backbuffer.drawString(oilPressureSensor.StrVoltage() + " V", 162, 220);
+    backbuffer.drawString("U: "+ waterTempSensor.StrVoltage() + " V", x0, y);
+    backbuffer.drawString("U: "+ oilTempSensor.StrVoltage() + " V", x1, y);
+    backbuffer.drawString("U: "+ fuelLevelSensor.StrVoltage() + " V", x2, y);
+    y+=off;
+
+    backbuffer.setTextColor(TFT_DARKGREEN);
+    backbuffer.drawString("Up:" + waterTempSensor.StrPullUpVoltage() + " V", x0, y);
+    backbuffer.drawString("Up:" + oilTempSensor.StrPullUpVoltage() + " V", x1, y);
+    backbuffer.drawString("Up:" + fuelLevelSensor.StrPullUpVoltage() + " V", x2, y);
+    y+=off;
+
+
+    y+=off;
+    y+=20;
+
+    backbuffer.setTextColor(TFT_WHITE);
+    backbuffer.drawString("Fuel Press:", x0, y);
+    backbuffer.drawString("Oil Press:", x1, y);
+    backbuffer.drawString("Voltage 12:", x2, y);
+    y+=off;
+
+    backbuffer.setTextColor(TFT_SILVER);
+    backbuffer.drawString(fuelPressureSensor.StrValueRaw(2) + " Bar", x0, y);
+    backbuffer.drawString(oilPressureSensor.StrValueRaw(2) + " Bar", x1, y);
+    y+=off;
+
+    backbuffer.setTextColor(TFT_GREEN);
+    backbuffer.drawString("U: "+ fuelPressureSensor.StrVoltage() + " V", x0, y);
+    backbuffer.drawString("U: "+ oilPressureSensor.StrVoltage() + " V", x1, y);
+    backbuffer.drawString("U: "+ voltage12v.StrValueRaw() + " V", x2, y);
+}
+
+void UpdateButton()
+{
+    if(digitalRead(BUTTON1_PIN) == 0)
+    {
+        if(!buttonIsDown)
+        {
+            buttonIsDown = true;
+            buttonDownTimestamp = millis();
+            switch (mode)
+            {
+            case Mode::MAIN1:
+                mode = Mode::MAIN2;
+                break;
+            case Mode::MAIN2:
+            case Mode::DEBUG:
+                mode = Mode::MAIN1;
+                break;
+            }
+        }
+        else if(buttonLongPressTime + buttonDownTimestamp < millis())
+        {
+            mode = Mode::DEBUG;
+        }
+    }
+    else
+    {
+        buttonIsDown = false;
+    }
+}
+
+void Draw()
+{
+    switch (mode)
+    {
+    case Mode::MAIN1:
+    case Mode::MAIN2:
+        DrawMainScreen();
+        break;
+    case Mode::DEBUG:
+        DrawDebugScreen();
+        break;
+    }
+    //DrawFPS();
 }
 
 void loop()
 {
+    UpdateButton();
     UpdateSensors();
-
-    DrawMainScreen();
-    //DrawDebugScreen();
-    DrawFPS();
+    UpdateWarnings();
+    Draw();
 
     backbuffer.pushSprite(0,0);
+
+    //delay(500);
 }
