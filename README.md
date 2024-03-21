@@ -41,6 +41,8 @@ There is also mirrored PDF version for PCB etching using Laser Printer if you do
 
 ![image](./readme_images/PCB.png)
 
+It is recommended to use high precision resistor for voltage dividers. Bigger ones are SMD 2512, smaller are SMD1206.
+
 ### ADC
 
 Two external 16bit ADCs are used to make measurements more precise - ADS1115.
