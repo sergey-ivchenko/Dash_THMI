@@ -9,6 +9,9 @@
 #include "bg2.h"
 #include "DrawUtils.h"
 
+#define PIN_WARNING 17
+#define PIN_BUTTON 18
+
 #define I2C_SDA 43
 #define I2C_SCL 44
 
@@ -30,9 +33,9 @@ double voltage12VVoltage[] = {0,6};
 double voltage12VValues[] = {0,22.78};
 uint16_t voltage12VLen = 2;
 
-AnalogSensor waterTempSensor(tempResistance, tempValues, tempLen, sensorsPullup, 10000/*Ohm*/, 20, &ads0, 0, AnalogSensor::SensorType::RESISTIVE);
-AnalogSensor oilTempSensor(tempResistance, tempValues, tempLen, sensorsPullup, 10000/*Ohm*/, 20, &ads0, 1, AnalogSensor::SensorType::RESISTIVE);
-AnalogSensor voltage12v(voltage12VVoltage, voltage12VValues, voltage12VLen, -1, -1, 0, &ads0, 3, AnalogSensor::SensorType::VOLTAGE);
+AnalogSensor waterTempSensor(tempResistance, tempValues, tempLen, sensorsPullup, 10000/*Ohm (9900?)*/, 20, &ads0, 0, AnalogSensor::Type::RESISTIVE);
+AnalogSensor oilTempSensor(tempResistance, tempValues, tempLen, sensorsPullup, 10000/*Ohm (9900?)*/, 20, &ads0, 1, AnalogSensor::Type::RESISTIVE);
+AnalogSensor voltage12v(voltage12VVoltage, voltage12VValues, voltage12VLen, -1, -1, 0, &ads0, 3, AnalogSensor::Type::VOLTAGE);
 //------------------------------------------------------------
 //ads1 sensors
 ADS1115<TwoWire> ads1(Wire);
@@ -52,10 +55,10 @@ uint16_t oilPresLen = 2;
 double voltage5VValues[] = {0,6};
 uint16_t voltage5VLen = 2;
 
-AnalogSensor fuelLevelSensor(fuelLevelResistance, fuelLevelValues, fuelLevelLen, sensorsPullup, 200/*Ohm*/, 500, &ads1, 0,  AnalogSensor::SensorType::RESISTIVE);
-AnalogSensor fuelPressureSensor(fuelPresVoltage, fuelPresValues, fuelPresLen, -1, -1, 0, &ads1, 1,  AnalogSensor::SensorType::VOLTAGE);
-AnalogSensor oilPressureSensor(oilPresVoltage, oilPresValues, oilPresLen, -1, -1, 0, &ads1, 2, AnalogSensor::SensorType::VOLTAGE);
-AnalogSensor voltage5v(voltage5VValues, voltage5VValues, voltage5VLen, -1, -1, 0, &ads1, 3, AnalogSensor::SensorType::VOLTAGE);
+AnalogSensor fuelLevelSensor(fuelLevelResistance, fuelLevelValues, fuelLevelLen, sensorsPullup, 200/*Ohm*/, 500, &ads1, 0,  AnalogSensor::Type::RESISTIVE);
+AnalogSensor fuelPressureSensor(fuelPresVoltage, fuelPresValues, fuelPresLen, -1, -1, 0, &ads1, 1,  AnalogSensor::Type::VOLTAGE);
+AnalogSensor oilPressureSensor(oilPresVoltage, oilPresValues, oilPresLen, -1, -1, 0, &ads1, 2, AnalogSensor::Type::VOLTAGE);
+AnalogSensor voltage5v(voltage5VValues, voltage5VValues, voltage5VLen, -1, -1, 0, &ads1, 3, AnalogSensor::Type::VOLTAGE);
 //------------------------------------------------------------
 
 enum class Mode : uint8_t
@@ -70,7 +73,15 @@ Mode mode = Mode::MAIN1;
 
 bool buttonIsDown = false;
 u_long buttonDownTimestamp = 0;
-const u_long buttonLongPressTime = 5000;
+const u_long buttonDebugPressTime = 5000;
+const u_long buttonWarningPressTime = 1500;
+bool bWarningPresIsProcessed = false;
+
+//------------------------------------------------------------
+//Time before warnings are enabled after ignition is turned on.
+//This is to avoid low voltage warning when starting the car.
+const u_long warningDelayTime = 10000;
+u_long startTime = 0;   
 //------------------------------------------------------------
 
 void InitWarnings()
@@ -82,7 +93,7 @@ void InitWarnings()
     waterTempSensor.SetWarningSettings(ws);
 
     ws.condition = AnalogSensor::WarningCondition::ABOVE;
-    ws.threshold = 125;
+    ws.threshold = 120;
     oilTempSensor.SetWarningSettings(ws);
 
     ws.condition = AnalogSensor::WarningCondition::BELOW;
@@ -92,6 +103,14 @@ void InitWarnings()
     ws.condition = AnalogSensor::WarningCondition::BELOW;
     ws.threshold = 3.0;
     fuelPressureSensor.SetWarningSettings(ws);
+
+    ws.condition = AnalogSensor::WarningCondition::BELOW;
+    ws.threshold = 3.0;
+    fuelPressureSensor.SetWarningSettings(ws);
+
+    ws.condition = AnalogSensor::WarningCondition::BELOW;
+    ws.threshold = 12.5;
+    voltage12v.SetWarningSettings(ws);
 }
 
 void setBrightness(uint8_t value)
@@ -202,6 +221,10 @@ void InitI2C()
 
 void UpdateWarnings()
 {
+    if(millis() - startTime < warningDelayTime)
+    {
+        return;
+    }
     if(!bEnableWarnings)
     {
         tft.invertDisplay(false);
@@ -220,8 +243,10 @@ void UpdateWarnings()
 
 void setup()
 {
+    startTime = millis();
     Serial.begin(9600);
-    pinMode(BUTTON1_PIN, INPUT_PULLUP);
+    pinMode(PIN_BUTTON, INPUT_PULLUP);
+    pinMode(PIN_WARNING, OUTPUT);
 
     pinMode(PWR_EN_PIN, OUTPUT);
     digitalWrite(PWR_EN_PIN, HIGH);
@@ -350,7 +375,7 @@ void DrawDebugScreen()
 
 void UpdateButton()
 {
-    if(digitalRead(BUTTON1_PIN) == 0)
+    if(digitalRead(PIN_BUTTON) == 0)
     {
         if(!buttonIsDown)
         {
@@ -367,14 +392,23 @@ void UpdateButton()
                 break;
             }
         }
-        else if(buttonLongPressTime + buttonDownTimestamp < millis())
+        else 
         {
-            mode = Mode::DEBUG;
+            if(millis() > buttonDebugPressTime + buttonDownTimestamp)
+            {
+                mode = Mode::DEBUG;
+            }
+            else if(millis() > buttonWarningPressTime + buttonDownTimestamp && !bWarningPresIsProcessed)
+            {
+                bEnableWarnings = !bEnableWarnings;
+                bWarningPresIsProcessed = true;
+            }
         }
     }
     else
     {
         buttonIsDown = false;
+        bWarningPresIsProcessed = false;
     }
 }
 

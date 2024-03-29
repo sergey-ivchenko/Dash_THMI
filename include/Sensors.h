@@ -6,21 +6,23 @@ class AnalogSensor
 {
 public:
 
-    enum class SensorType : uint16_t 
+    enum class Type : uint16_t 
     {
-    RESISTIVE = 0,
-    VOLTAGE
+        RESISTIVE = 0,
+        VOLTAGE
     };
 
     enum class WarningCondition : uint8_t 
     {
-        BELOW = 0,
-        ABOVE
+        NONE = 0,
+        BELOW,
+        ABOVE,
+        
     };
 
     struct WarningSettings
     {
-        WarningCondition condition;
+        WarningCondition condition = WarningCondition::NONE;
         double threshold;
     };
 
@@ -38,7 +40,7 @@ private:
     float curVoltage = 0;
 
     float curResistance = 45000;
-    SensorType type = SensorType::RESISTIVE;
+    Type type = Type::RESISTIVE;
 
     ADS1X15::ADS1115<TwoWire>* ads;
     uint8_t channel;
@@ -82,7 +84,7 @@ private:
     }
 
 public:
-    AnalogSensor(double* inTable, double* outTable, uint16_t tableLen, float V, float R, uint16_t smooth, ADS1X15::ADS1115<TwoWire>* ads, uint8_t channel, SensorType type = SensorType::RESISTIVE)
+    AnalogSensor(double* inTable, double* outTable, uint16_t tableLen, float V, float R, uint16_t smooth, ADS1X15::ADS1115<TwoWire>* ads, uint8_t channel, Type type = Type::RESISTIVE)
     {
         this->outTable = outTable;
         this->inTable = inTable;
@@ -109,7 +111,7 @@ public:
         }
         else
         {
-            double inValue = type==SensorType::RESISTIVE ? curResistance : curVoltage;
+            double inValue = type==Type::RESISTIVE ? curResistance : curVoltage;
             curValue = InterpolateLinear(inTable, outTable, tableLen, inValue, true);
 
             //curValue = Interpolation::CatmullSpline(inTable, outTable, tableLen, inValue);
@@ -127,14 +129,14 @@ public:
 
     String StrValue(uint16_t decimals = 2)
     {
-        if(type== SensorType::RESISTIVE && (Resistance() > 1000000 || Resistance() < 1))
+        if(type == Type::RESISTIVE && (Resistance() > 1000000 || Resistance() < 1))
             return "---";
         return String(smoothValue, decimals);
     }
 
     String StrValueRaw(uint16_t decimals = 2)
     {
-        if(type== SensorType::RESISTIVE)
+        if(type == Type::RESISTIVE)
         {
             if(curVoltage >= pullupVoltage - 0.01) 
             {
