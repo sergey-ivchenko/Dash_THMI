@@ -1,6 +1,8 @@
 #include <Arduino.h>
 #include <TFT_eSPI.h>
 #include <Wire.h>
+#include <vector>
+#include <EEPROM.h>
 
 #include "pins.h"
 #include "sensors.h"
@@ -8,6 +10,11 @@
 #include "bg1.h"
 #include "bg2.h"
 #include "DrawUtils.h"
+#include "WebConfigurator.h"
+
+#define EEP_INIT_ADDR 0
+#define EEP_START_ADDR 1
+#define EEP_INIT_VAL 55
 
 #define PIN_WARNING 17
 #define PIN_BUTTON 18
@@ -33,9 +40,9 @@ double voltage12VVoltage[] = {0,6};
 double voltage12VValues[] = {0,22.78};
 uint16_t voltage12VLen = 2;
 
-AnalogSensor waterTempSensor(tempResistance, tempValues, tempLen, sensorsPullup, 10000/*Ohm (9900?)*/, 20, &ads0, 0, AnalogSensor::Type::RESISTIVE);
-AnalogSensor oilTempSensor(tempResistance, tempValues, tempLen, sensorsPullup, 10000/*Ohm (9900?)*/, 20, &ads0, 1, AnalogSensor::Type::RESISTIVE);
-AnalogSensor voltage12v(voltage12VVoltage, voltage12VValues, voltage12VLen, -1, -1, 0, &ads0, 3, AnalogSensor::Type::VOLTAGE);
+AnalogSensor waterTempSensor("Water temp",tempResistance, tempValues, tempLen, sensorsPullup, 10000/*Ohm (9900?)*/, 20, &ads0, 0, AnalogSensor::Type::RESISTIVE);
+AnalogSensor oilTempSensor("Oil temp",tempResistance, tempValues, tempLen, sensorsPullup, 10000/*Ohm (9900?)*/, 20, &ads0, 1, AnalogSensor::Type::RESISTIVE);
+AnalogSensor voltage12v("Voltage", voltage12VVoltage, voltage12VValues, voltage12VLen, -1, -1, 0, &ads0, 3, AnalogSensor::Type::VOLTAGE);
 //------------------------------------------------------------
 //ads1 sensors
 ADS1115<TwoWire> ads1(Wire);
@@ -55,17 +62,19 @@ uint16_t oilPresLen = 2;
 double voltage5VValues[] = {0,6};
 uint16_t voltage5VLen = 2;
 
-AnalogSensor fuelLevelSensor(fuelLevelResistance, fuelLevelValues, fuelLevelLen, sensorsPullup, 200/*Ohm*/, 500, &ads1, 0,  AnalogSensor::Type::RESISTIVE);
-AnalogSensor fuelPressureSensor(fuelPresVoltage, fuelPresValues, fuelPresLen, -1, -1, 0, &ads1, 1,  AnalogSensor::Type::VOLTAGE);
-AnalogSensor oilPressureSensor(oilPresVoltage, oilPresValues, oilPresLen, -1, -1, 0, &ads1, 2, AnalogSensor::Type::VOLTAGE);
-AnalogSensor voltage5v(voltage5VValues, voltage5VValues, voltage5VLen, -1, -1, 0, &ads1, 3, AnalogSensor::Type::VOLTAGE);
+AnalogSensor fuelLevelSensor("Fuel level", fuelLevelResistance, fuelLevelValues, fuelLevelLen, sensorsPullup, 200/*Ohm*/, 500, &ads1, 0,  AnalogSensor::Type::RESISTIVE);
+AnalogSensor fuelPressureSensor("Fuel Pressure", fuelPresVoltage, fuelPresValues, fuelPresLen, -1, -1, 0, &ads1, 1,  AnalogSensor::Type::VOLTAGE);
+AnalogSensor oilPressureSensor("Oil Pressure", oilPresVoltage, oilPresValues, oilPresLen, -1, -1, 0, &ads1, 2, AnalogSensor::Type::VOLTAGE);
+AnalogSensor voltage5v("Voltage5V", voltage5VValues, voltage5VValues, voltage5VLen, -1, -1, 0, &ads1, 3, AnalogSensor::Type::VOLTAGE);
 //------------------------------------------------------------
-
+std::vector<AnalogSensor*> sensorsWithWarnings;
+//------------------------------------------------------------
 enum class Mode : uint8_t
 {
     MAIN1 = 0,
     MAIN2,
-    DEBUG
+    DEBUG,
+    WiFi
 };
 
 Mode mode = Mode::MAIN1;
@@ -84,33 +93,82 @@ const u_long warningDelayTime = 10000;
 u_long startTime = 0;   
 //------------------------------------------------------------
 
-void InitWarnings()
+
+void LoadSensorsWarnings()
 {
-    AnalogSensor::WarningSettings ws;
+    uint16_t addr = EEP_START_ADDR;
+    const uint16_t settingsSize = sizeof(AnalogSensor::WarningSettings);
+    for(auto sensor : sensorsWithWarnings)
+    {
+        EEPROM.readBytes(addr, &(sensor->warningSettings), settingsSize);
+        addr += settingsSize;
+    }
+    Serial.println("Load from EEPROM");
+}
 
-    ws.condition = AnalogSensor::WarningCondition::ABOVE;
-    ws.threshold = 105;
-    waterTempSensor.SetWarningSettings(ws);
+void SaveSensorsWarnings()
+{
+    uint16_t addr = EEP_START_ADDR;
+    const uint16_t settingsSize = sizeof(AnalogSensor::WarningSettings);
+    for(auto sensor : sensorsWithWarnings)
+    {
+        EEPROM.put(addr, sensor->warningSettings);
+        addr += settingsSize;
+    }
+    EEPROM.commit();
+}
 
-    ws.condition = AnalogSensor::WarningCondition::ABOVE;
-    ws.threshold = 120;
-    oilTempSensor.SetWarningSettings(ws);
+void InitSensorsWarnings()
+{  
 
-    ws.condition = AnalogSensor::WarningCondition::BELOW;
-    ws.threshold = 0.5;
-    oilPressureSensor.SetWarningSettings(ws);
+    sensorsWithWarnings.push_back(&waterTempSensor);
+    sensorsWithWarnings.push_back(&oilTempSensor);
+    sensorsWithWarnings.push_back(&oilPressureSensor);
+    sensorsWithWarnings.push_back(&fuelPressureSensor);
+    sensorsWithWarnings.push_back(&fuelLevelSensor);
+    sensorsWithWarnings.push_back(&voltage12v);
 
-    ws.condition = AnalogSensor::WarningCondition::BELOW;
-    ws.threshold = 3.0;
-    fuelPressureSensor.SetWarningSettings(ws);
+    uint16_t eepSize = sensorsWithWarnings.size() * sizeof(AnalogSensor::WarningSettings) + 1;
+    EEPROM.begin(eepSize);
+    uint8_t initByte = EEPROM.read(EEP_INIT_ADDR);
 
-    ws.condition = AnalogSensor::WarningCondition::BELOW;
-    ws.threshold = 3.0;
-    fuelPressureSensor.SetWarningSettings(ws);
+    if (initByte == EEP_INIT_VAL)
+    {
+        LoadSensorsWarnings();
+    }
+    else
+    {
+        //initialize default warning conditions
+        AnalogSensor::WarningSettings ws;
+        ws.condition = AnalogSensor::WarningCondition::ABOVE;
+        ws.threshold = 105;
+        waterTempSensor.SetWarningSettings(ws);
 
-    ws.condition = AnalogSensor::WarningCondition::BELOW;
-    ws.threshold = 12.5;
-    voltage12v.SetWarningSettings(ws);
+        ws.condition = AnalogSensor::WarningCondition::ABOVE;
+        ws.threshold = 120;
+        oilTempSensor.SetWarningSettings(ws);
+
+        ws.condition = AnalogSensor::WarningCondition::BELOW;
+        ws.threshold = 0.5;
+        oilPressureSensor.SetWarningSettings(ws);
+
+        ws.condition = AnalogSensor::WarningCondition::BELOW;
+        ws.threshold = 3.0;
+        fuelPressureSensor.SetWarningSettings(ws);
+
+        ws.condition = AnalogSensor::WarningCondition::BELOW;
+        ws.threshold = 3.0;
+        fuelPressureSensor.SetWarningSettings(ws);
+
+        ws.condition = AnalogSensor::WarningCondition::BELOW;
+        ws.threshold = 12.5;
+        voltage12v.SetWarningSettings(ws);
+
+        EEPROM.write(EEP_INIT_ADDR, EEP_INIT_VAL); //mark EEP as initialized
+
+        SaveSensorsWarnings();
+    }
+
 }
 
 void setBrightness(uint8_t value)
@@ -225,20 +283,28 @@ void UpdateWarnings()
     {
         return;
     }
-    if(!bEnableWarnings)
-    {
-        tft.invertDisplay(false);
-    }
-    else if (
-        oilTempSensor.IsWarning() ||
+    bool bHasAnyWarning = oilTempSensor.IsWarning() ||
         waterTempSensor.IsWarning() ||
         voltage12v.IsWarning() ||
         fuelLevelSensor.IsWarning() ||
         fuelPressureSensor.IsWarning() ||
-        oilPressureSensor.IsWarning())
+        oilPressureSensor.IsWarning();
+
+    if (bEnableWarnings && mode != Mode::DEBUG && mode != Mode::WiFi && bHasAnyWarning)
     {
         tft.invertDisplay(millis() % 1000 > 500);
     }
+    else
+    {
+        tft.invertDisplay(false);
+    }
+}
+
+void InitWebConfig()
+{
+    WebConfInit();
+    WebConfOnSave(SaveSensorsWarnings);
+    WebConfSetSensors(sensorsWithWarnings);
 }
 
 void setup()
@@ -253,9 +319,10 @@ void setup()
 
     InitTft();
     InitI2C();
-    InitWarnings();
+    InitSensorsWarnings();
 
     UpdateSensors();
+    InitWebConfig();
 }
 
 void DrawFPS()
@@ -316,8 +383,6 @@ void DrawDebugScreen()
     uint16_t y = 40;
     uint16_t off = 18;
     backbuffer.fillSprite(TFT_BLACK);
-    // backbuffer.drawLine(160, 0, 160, 240, TFT_DARKGREY);
-    // backbuffer.drawLine(0, 130, 320, 130, TFT_DARKGREY);
 
     backbuffer.loadFont(Arial_16);
     backbuffer.setTextColor(TFT_WHITE);
@@ -373,6 +438,27 @@ void DrawDebugScreen()
     backbuffer.drawString("U: "+ voltage12v.StrValueRaw() + " V", x2, y);
 }
 
+void DrawWiFiScreen()
+{
+    backbuffer.loadFont(Arial_16);
+    backbuffer.setTextColor(TFT_WHITE);
+    backbuffer.setTextDatum(CC_DATUM);
+
+    backbuffer.fillSprite(TFT_BLACK);
+    if(WebConfIsClientConnected())
+    {
+        backbuffer.drawString("WiFi client is connected", 160, 75);
+        backbuffer.drawString("Open 192.168.4.1 in your browser", 160, 100);
+        backbuffer.drawString("to configure the dashboard", 160, 125);
+    }
+    else
+    {
+        backbuffer.drawString("Listening for Wi-Fi connections", 160, 75);
+        backbuffer.drawString("SSID: " + String(web_ssid), 160, 100);
+        backbuffer.drawString("Password: " + String(web_password) , 160, 125);
+    }
+}
+
 void UpdateButton()
 {
     if(digitalRead(PIN_BUTTON) == 0)
@@ -387,8 +473,15 @@ void UpdateButton()
                 mode = Mode::MAIN2;
                 break;
             case Mode::MAIN2:
-            case Mode::DEBUG:
                 mode = Mode::MAIN1;
+                break;
+            case Mode::DEBUG:
+                mode = Mode::WiFi;
+                WebConfStartWiFiAP();
+                break;
+            case Mode::WiFi:
+                mode = Mode::MAIN1;
+                WebConfStopWiFiAP();
                 break;
             }
         }
@@ -414,27 +507,37 @@ void UpdateButton()
 
 void Draw()
 {
-    switch (mode)
     {
-    case Mode::MAIN1:
-    case Mode::MAIN2:
-        DrawMainScreen();
-        break;
-    case Mode::DEBUG:
-        DrawDebugScreen();
-        break;
+        switch (mode)
+        {
+        case Mode::MAIN1:
+        case Mode::MAIN2:
+            DrawMainScreen();
+            break;
+        case Mode::DEBUG:
+            DrawDebugScreen();
+            break;
+        case Mode::WiFi:
+            DrawWiFiScreen();
+            break;
+        }
+        //DrawFPS();
     }
-    //DrawFPS();
 }
 
 void loop()
 {
     UpdateButton();
-    UpdateSensors();
-    UpdateWarnings();
+    if(mode == Mode::WiFi)
+    {
+        WebConfListenClients();
+    }
+    else
+    {
+        UpdateSensors();
+        UpdateWarnings();
+    }
     Draw();
 
     backbuffer.pushSprite(0,0);
-
-    //delay(500);
 }

@@ -26,9 +26,9 @@ public:
         double threshold;
     };
 
-private:
-    float pullupResistor = 1190;
-    float pullupVoltage = 3.33;
+public:
+    float pullupResistor = 10000;
+    float pullupVoltage = 5;
     uint16_t smoothProbesCount = 10;
 
     double* inTable = nullptr;
@@ -41,6 +41,8 @@ private:
 
     float curResistance = 45000;
     Type type = Type::RESISTIVE;
+
+    String name;
 
     ADS1X15::ADS1115<TwoWire>* ads;
     uint8_t channel;
@@ -84,8 +86,9 @@ private:
     }
 
 public:
-    AnalogSensor(double* inTable, double* outTable, uint16_t tableLen, float V, float R, uint16_t smooth, ADS1X15::ADS1115<TwoWire>* ads, uint8_t channel, Type type = Type::RESISTIVE)
+    AnalogSensor(String name, double* inTable, double* outTable, uint16_t tableLen, float V, float R, uint16_t smooth, ADS1X15::ADS1115<TwoWire>* ads, uint8_t channel, Type type = Type::RESISTIVE)
     {
+        this->name = name;
         this->outTable = outTable;
         this->inTable = inTable;
         this->tableLen = tableLen;
@@ -163,6 +166,11 @@ public:
     String StrPullUpVoltage()
     {
         return String(pullupVoltage, 3);
+    }
+
+    String Name()
+    {
+        return name;
     }
 
     
