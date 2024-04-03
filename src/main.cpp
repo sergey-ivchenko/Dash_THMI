@@ -24,7 +24,6 @@
 
 TFT_eSPI tft = TFT_eSPI();
 TFT_eSprite backbuffer = TFT_eSprite(&tft);
-bool bEnableWarnings = false;
 //-------------Sensors----------------------------------------
 using namespace ADS1X15;
 //------------------------------------------------------------
@@ -83,9 +82,6 @@ Mode mode = Mode::MAIN1;
 bool buttonIsDown = false;
 u_long buttonDownTimestamp = 0;
 const u_long buttonDebugPressTime = 5000;
-const u_long buttonWarningPressTime = 1500;
-bool bWarningPresIsProcessed = false;
-
 //------------------------------------------------------------
 //Time before warnings are enabled after ignition is turned on.
 //This is to avoid low voltage warning when starting the car.
@@ -93,6 +89,10 @@ const u_long warningDelayTime = 10000;
 u_long startTime = 0;   
 //------------------------------------------------------------
 
+bool Blink(uint16_t period)
+{
+    return millis() % period > (period>>1);
+}
 
 void LoadSensorsWarnings()
 {
@@ -283,6 +283,7 @@ void UpdateWarnings()
     {
         return;
     }
+
     bool bHasAnyWarning = oilTempSensor.IsWarning() ||
         waterTempSensor.IsWarning() ||
         voltage12v.IsWarning() ||
@@ -290,13 +291,14 @@ void UpdateWarnings()
         fuelPressureSensor.IsWarning() ||
         oilPressureSensor.IsWarning();
 
-    if (bEnableWarnings && mode != Mode::DEBUG && mode != Mode::WiFi && bHasAnyWarning)
+    if (mode != Mode::DEBUG && mode != Mode::WiFi && bHasAnyWarning)
     {
-        tft.invertDisplay(millis() % 1000 > 500);
+        bool blinkState = Blink(1000);
+        digitalWrite(PIN_WARNING, blinkState ? HIGH : LOW);
     }
     else
     {
-        tft.invertDisplay(false);
+        digitalWrite(PIN_WARNING, LOW);
     }
 }
 
@@ -342,6 +344,8 @@ void DrawFPS()
 
 void DrawMainScreen()
 {
+    bool blinkRed = Blink(1000) && (millis() - startTime > warningDelayTime);
+
     backbuffer.setTextColor(TFT_WHITE);
     backbuffer.setTextDatum(TR_DATUM);
     backbuffer.loadFont(Square721_44);
@@ -349,13 +353,19 @@ void DrawMainScreen()
     {
     case Mode::MAIN1:
         backbuffer.pushImage(0,0, 320, 240, bg1);
+        backbuffer.setTextColor(blinkRed && oilTempSensor.IsWarning() ? TFT_RED : TFT_WHITE);
         backbuffer.drawString(oilTempSensor.StrValue(0), 186, 95);
+
+        backbuffer.setTextColor(blinkRed && oilPressureSensor.IsWarning() ? TFT_RED : TFT_WHITE);
         backbuffer.drawString(oilPressureSensor.StrValue(1), 186, 156);
         break;
 
     case Mode::MAIN2:
         backbuffer.pushImage(0,0, 320, 240, bg2);
+        backbuffer.setTextColor(blinkRed && fuelPressureSensor.IsWarning() ? TFT_RED : TFT_WHITE);
         backbuffer.drawString(fuelPressureSensor.StrValue(1), 186, 95);
+        
+        backbuffer.setTextColor(blinkRed && voltage12v.IsWarning() ? TFT_RED : TFT_WHITE);
         backbuffer.drawString(voltage12v.StrValue(1), 198, 156);
         break;
     
@@ -363,6 +373,7 @@ void DrawMainScreen()
         break;
     }
 
+    backbuffer.setTextColor(blinkRed && waterTempSensor.IsWarning() ? TFT_RED : TFT_WHITE);
     backbuffer.drawString(waterTempSensor.StrValue(0), 186, 24);
 
     DrawProgressBar(backbuffer, P_VERTICAL, 257, 183, 16, 155, 
@@ -371,6 +382,7 @@ void DrawMainScreen()
 
     backbuffer.loadFont(Square721_25);
     backbuffer.setTextDatum(BC_DATUM);
+    backbuffer.setTextColor(blinkRed && fuelLevelSensor.IsWarning() ? TFT_RED : TFT_WHITE);
     backbuffer.drawString(fuelLevelSensor.StrValue(0) + "%", 277, 231);
 }
 
@@ -491,17 +503,11 @@ void UpdateButton()
             {
                 mode = Mode::DEBUG;
             }
-            else if(millis() > buttonWarningPressTime + buttonDownTimestamp && !bWarningPresIsProcessed)
-            {
-                bEnableWarnings = !bEnableWarnings;
-                bWarningPresIsProcessed = true;
-            }
         }
     }
     else
     {
         buttonIsDown = false;
-        bWarningPresIsProcessed = false;
     }
 }
 
@@ -521,7 +527,7 @@ void Draw()
             DrawWiFiScreen();
             break;
         }
-        //DrawFPS();
+        DrawFPS();
     }
 }
 
