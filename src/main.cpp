@@ -5,7 +5,7 @@
 #include <EEPROM.h>
 
 #include "pins.h"
-#include "sensors.h"
+#include "Sensors.h"
 #include "fonts.h"
 #include "bg1.h"
 #include "bg2.h"
@@ -16,58 +16,9 @@
 #define EEP_START_ADDR 1
 #define EEP_INIT_VAL 55
 
-#define PIN_WARNING 17
-#define PIN_BUTTON 18
-
-#define I2C_SDA 43
-#define I2C_SCL 44
-
 TFT_eSPI tft = TFT_eSPI();
 TFT_eSprite backbuffer = TFT_eSprite(&tft);
-//-------------Sensors----------------------------------------
-using namespace ADS1X15;
-//------------------------------------------------------------
-const double sensorsPullup = 5.0;
-//ads0 sensors
-ADS1115<TwoWire> ads0(Wire);//addr 2 gnd
 
-double tempResistance[] = {900,1170, 1510, 1970, 2550, 3320, 4430, 6140, 8610, 12320, 17950, 26650, 40340, 62320};
-double tempValues[] = {150, 140, 130, 120, 110, 100, 90, 80, 70, 60, 50, 40, 30, 20};
-uint16_t tempLen = 14;
-
-double voltage12VVoltage[] = {0,6};
-double voltage12VValues[] = {0,22.78};
-uint16_t voltage12VLen = 2;
-
-AnalogSensor waterTempSensor("Water temp",tempResistance, tempValues, tempLen, sensorsPullup, 10000/*Ohm (9900?)*/, 20, &ads0, 0, AnalogSensor::Type::RESISTIVE);
-AnalogSensor oilTempSensor("Oil temp",tempResistance, tempValues, tempLen, sensorsPullup, 10000/*Ohm (9900?)*/, 20, &ads0, 1, AnalogSensor::Type::RESISTIVE);
-AnalogSensor voltage12v("Voltage", voltage12VVoltage, voltage12VValues, voltage12VLen, -1, -1, 0, &ads0, 3, AnalogSensor::Type::VOLTAGE);
-//------------------------------------------------------------
-//ads1 sensors
-ADS1115<TwoWire> ads1(Wire);
-
-double fuelLevelResistance[] = {5, 32, 110};//stock EF fuel sensor
-double fuelLevelValues[] = {100, 50, 0};
-uint16_t fuelLevelLen = 3;
-
-double fuelPresVoltage[] = {0.5, 4.5};
-double fuelPresValues[] = {0, 6.89};//100psi sensor
-uint16_t fuelPresLen = 2;
-
-double oilPresVoltage[] = {0.5, 4.5};
-double oilPresValues[] = {0, 10.34};//150psi sensor
-uint16_t oilPresLen = 2;
-
-double voltage5VValues[] = {0,6};
-uint16_t voltage5VLen = 2;
-
-AnalogSensor fuelLevelSensor("Fuel level", fuelLevelResistance, fuelLevelValues, fuelLevelLen, sensorsPullup, 200/*Ohm*/, 500, &ads1, 0,  AnalogSensor::Type::RESISTIVE);
-AnalogSensor fuelPressureSensor("Fuel Pressure", fuelPresVoltage, fuelPresValues, fuelPresLen, -1, -1, 0, &ads1, 1,  AnalogSensor::Type::VOLTAGE);
-AnalogSensor oilPressureSensor("Oil Pressure", oilPresVoltage, oilPresValues, oilPresLen, -1, -1, 0, &ads1, 2, AnalogSensor::Type::VOLTAGE);
-AnalogSensor voltage5v("Voltage5V", voltage5VValues, voltage5VValues, voltage5VLen, -1, -1, 0, &ads1, 3, AnalogSensor::Type::VOLTAGE);
-//------------------------------------------------------------
-std::vector<AnalogSensor*> sensorsWithWarnings;
-//------------------------------------------------------------
 enum class Mode : uint8_t
 {
     MAIN1 = 0,
@@ -78,7 +29,6 @@ enum class Mode : uint8_t
 
 Mode mode = Mode::MAIN1;
 //------------------------------------------------------------
-
 bool buttonIsDown = false;
 u_long buttonDownTimestamp = 0;
 const u_long buttonDebugPressTime = 5000;
@@ -103,7 +53,6 @@ void LoadSensorsWarnings()
         EEPROM.readBytes(addr, &(sensor->warningSettings), settingsSize);
         addr += settingsSize;
     }
-    Serial.println("Load from EEPROM");
 }
 
 void SaveSensorsWarnings()
@@ -171,7 +120,7 @@ void InitSensorsWarnings()
 
 }
 
-void setBrightness(uint8_t value)
+void SetBrightness(uint8_t value)
 {
     static uint8_t steps = 16;
     static uint8_t _brightness = 0;
@@ -259,7 +208,7 @@ void InitTft()
 
     backbuffer.createSprite(320, 240);
     backbuffer.setSwapBytes(true);
-    setBrightness(16);
+    SetBrightness(16);
 }
 
 void InitI2C()
@@ -330,16 +279,19 @@ void setup()
 void DrawFPS()
 {
     static unsigned long lastFrameTime = 0;
+    static float avgFrameTime = 0;
     static float FPS = 0;
 
     unsigned long time = millis();
     uint32_t frameTime = time - lastFrameTime;
     lastFrameTime = time;
-    FPS = (FPS * 9 + 1000.f/frameTime) / 10;
+    
+    avgFrameTime = (avgFrameTime * 9 + frameTime) / 10;
+    FPS = 1000/avgFrameTime;
 
     backbuffer.setTextDatum(TL_DATUM);
-    backbuffer.loadFont(Arial_16);
-    backbuffer.drawString(String(FPS), 0, 0);
+    backbuffer.loadFont(font_Arial_16);
+    backbuffer.drawString(String(FPS), 16, 16);
 }
 
 void DrawMainScreen()
@@ -348,7 +300,7 @@ void DrawMainScreen()
 
     backbuffer.setTextColor(TFT_WHITE);
     backbuffer.setTextDatum(TR_DATUM);
-    backbuffer.loadFont(Square721_44);
+    backbuffer.loadFont(font_Square721_44);
     switch (mode)
     {
     case Mode::MAIN1:
@@ -380,7 +332,7 @@ void DrawMainScreen()
     10, 3, 2,
     (int)fuelLevelSensor.Value(), TFT_WHITE, TFT_DARKGREY);
 
-    backbuffer.loadFont(Square721_25);
+    backbuffer.loadFont(font_Square721_25);
     backbuffer.setTextDatum(BC_DATUM);
     backbuffer.setTextColor(blinkRed && fuelLevelSensor.IsWarning() ? TFT_RED : TFT_WHITE);
     backbuffer.drawString(fuelLevelSensor.StrValue(0) + "%", 277, 231);
@@ -396,7 +348,7 @@ void DrawDebugScreen()
     uint16_t off = 18;
     backbuffer.fillSprite(TFT_BLACK);
 
-    backbuffer.loadFont(Arial_16);
+    backbuffer.loadFont(font_Arial_16);
     backbuffer.setTextColor(TFT_WHITE);
     backbuffer.setTextDatum(TL_DATUM);
 
@@ -452,7 +404,7 @@ void DrawDebugScreen()
 
 void DrawWiFiScreen()
 {
-    backbuffer.loadFont(Arial_16);
+    backbuffer.loadFont(font_Arial_16);
     backbuffer.setTextColor(TFT_WHITE);
     backbuffer.setTextDatum(CC_DATUM);
 
@@ -527,7 +479,7 @@ void Draw()
             DrawWiFiScreen();
             break;
         }
-        DrawFPS();
+        //DrawFPS();
     }
 }
 

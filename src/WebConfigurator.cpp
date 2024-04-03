@@ -1,7 +1,8 @@
 #include <WiFi.h>
 #include <vector>
-#include "WebConfigurator.h"
 #include <WebServer.h>
+#include "AnalogSensor.h"
+#include "WebConfigurator.h"
 
 static WebServer server(80);
 static std::vector<AnalogSensor*> sensors;
@@ -80,6 +81,7 @@ html { font-family: monospace; text-align: center; background-color: #202020; co
 </html>
 
     )""";
+
 void HandleSave() 
 {
     uint8_t sensorIndex = 0;
@@ -96,6 +98,7 @@ void HandleSave()
     server.send(200, "text/html", savePageContent);
     onSaveCallback();
 }
+
 void HandleIndex() 
 {
     String content;

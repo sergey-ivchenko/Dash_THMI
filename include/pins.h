@@ -5,6 +5,11 @@
 #define BAT_ADC_PIN (5)
 #define BUTTON1_PIN (0)
 #define BUTTON2_PIN (21)
+#define PIN_WARNING (17)
+#define PIN_BUTTON (18)
+
+#define I2C_SDA (43)
+#define I2C_SCL (44)
 
 // lcd
 #define LCD_DATA0_PIN (48)
