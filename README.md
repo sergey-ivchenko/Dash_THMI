@@ -1,13 +1,13 @@
 <h1 align = "center"> Dash_THMI for Civic EF</h1>
 
-Attention: it is not polished. Many parts of code are draft and need to be refactored, but you know how it usually goes once it begin to work ))))
+Attention: it is not polished. Many parts of code are draft and need to be refactored, but you know how it usually goes once it begin to work.
 
 Project is for VSCode with PlatformIO. 
 Arduino framework.
 
 It displays:
-- Fuel level (rom stock sensor.
-- Coolant temperatue. External additional sensor required. Could be installed in stock place in case of D-series engine. Most likely should be the same for other Honda engine series.
+- Fuel level (from stock fuel level sensor in tank).
+- Coolant temperatue. External additional sensor required 1/8NPT thread. Could be installed in stock place in case of D-series engine. Most likely should be the same for other Honda engine series.
 - Oil temperature. External additional sensor required.
 - Oil pressure. External additional sensor required. 150psi. 0.5-4.5v
 - Fuel pressure. External additional sensor required. 100psi. 0.5-4.5v
