@@ -17,6 +17,9 @@ All these values are splitted into 2 screens. Screens could be switched with but
 
 ![image](./readme_images/screen1.jpg) ![image](./readme_images/screen2.jpg)
 
+
+![image](./readme_images/photo.jpg)
+
 Sensors I used:
 - Temperature - [Aliexpress](https://www.aliexpress.com/item/32841863847.html) (2 Wire Sensor, 1/8 NPT Thread, Temp Range 0°C to 150°C.)
 - Pressure - [Aliexpress](https://www.aliexpress.com/item/1005002854614444.html) (3 Wire Sensor, 1/8 NPT Thread, Output signal: 0.5-4.5V)
