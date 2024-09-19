@@ -1,5 +1,7 @@
 <h1 align = "center"> Dash_THMI for Civic EF</h1>
 
+Attention: it is not polished. Many parts of code are draft and need to be refactored, but you know how it usually goes once it begin to work ))))
+
 Project is for VSCode with PlatformIO. 
 Arduino framework.
 
